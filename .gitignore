@@ -1,0 +1,19 @@
+
+# System
+.DS_Store
+Thumbs.db
+node_modules
+dist
+.env
+.env.*
+
+# Agent
+.agent/
+.specify/
+tmp/
+.vscode/
+
+# Next.js (if any in root)
+.next/
+out/
+build/
