@@ -9,9 +9,20 @@ export async function updateSession(request: NextRequest) {
         },
     })
 
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+    // Safety check: Avoid crash if env vars are missing
+    if (!supabaseUrl || !supabaseKey) {
+        console.error('❌ Middleware Error: Missing Supabase Environment Variables!')
+        console.log('URL:', supabaseUrl ? 'Found' : 'Missing')
+        console.log('Key:', supabaseKey ? 'Found' : 'Missing')
+        return response
+    }
+
     const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        supabaseUrl,
+        supabaseKey,
         {
             cookies: {
                 getAll() {
