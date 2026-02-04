@@ -7,11 +7,12 @@ import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
-import { ArrowLeft, Calendar, User, Globe, MessageSquare, ExternalLink, RefreshCw } from "lucide-react"
+import { publishArticleToWordpress } from "@/app/actions/publish"
+import { deleteArticle, fixArticleFormat } from "@/app/actions/articles"
+import { ArrowLeft, Calendar, User, Globe, MessageSquare, ExternalLink, RefreshCw, Trash2, Wrench } from "lucide-react"
 import Link from "next/link"
 import ReactMarkdown from 'react-markdown'
 import { format } from "date-fns"
-import { publishArticleToWordpress } from "@/app/actions/publish"
 
 export default function ArticleDetailPage() {
     const params = useParams()
@@ -19,6 +20,7 @@ export default function ArticleDetailPage() {
     const [article, setArticle] = useState<any>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [isPublishing, setIsPublishing] = useState(false)
+    const [isFixing, setIsFixing] = useState(false)
 
     useEffect(() => {
         async function fetchArticle() {
@@ -57,6 +59,47 @@ export default function ArticleDetailPage() {
             console.error(e)
         }
         setIsPublishing(false)
+    }
+
+    async function handleDelete() {
+        if (!confirm("Are you sure you want to delete this article? This action cannot be undone.")) return
+
+        try {
+            const res = await deleteArticle(article.id)
+            if (res.success) {
+                router.push('/articles')
+            } else {
+                alert(`Failed to delete: ${res.error}`)
+            }
+        } catch (e) {
+            console.error(e)
+            alert("Error deleting article")
+        }
+    }
+
+    // Check if article content looks like JSON (either raw or wrapped in markdown code block)
+    const needsFormatFix = article?.content_html?.includes('"content"') && (
+        article?.content_html?.trim().startsWith('{') ||
+        article?.content_html?.includes('```json')
+    )
+
+    async function handleFixFormat() {
+        if (!confirm("This will attempt to fix the article format by extracting content from JSON. Continue?")) return
+
+        setIsFixing(true)
+        try {
+            const res = await fixArticleFormat(article.id)
+            if (res.success) {
+                alert("Format fixed successfully! Refreshing...")
+                window.location.reload()
+            } else {
+                alert(`Failed to fix: ${res.error}`)
+            }
+        } catch (e) {
+            console.error(e)
+            alert("Error fixing format")
+        }
+        setIsFixing(false)
     }
 
     if (isLoading) return <div className="p-8 text-center">Loading...</div>
@@ -166,6 +209,23 @@ export default function ArticleDetailPage() {
                         <ExternalLink className="w-4 h-4 mr-2" /> Export to Word (.docx)
                     </Button> */}
 
+
+                    {/* Show Fix Format button only if content looks like JSON */}
+                    {needsFormatFix && (
+                        <Button
+                            className="w-full"
+                            variant="secondary"
+                            onClick={handleFixFormat}
+                            disabled={isFixing}
+                        >
+                            {isFixing ? (
+                                <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Fixing...</>
+                            ) : (
+                                <><Wrench className="w-4 h-4 mr-2" /> Fix Format (JSON Detected)</>
+                            )}
+                        </Button>
+                    )}
+
                     <Button
                         className="w-full"
                         disabled={article.status === 'published' || isPublishing}
@@ -176,6 +236,14 @@ export default function ArticleDetailPage() {
                         ) : (
                             <>{article.status === 'published' ? 'Published' : 'Publish to WordPress'}</>
                         )}
+                    </Button>
+
+                    <Button
+                        variant="destructive"
+                        className="w-full"
+                        onClick={handleDelete}
+                    >
+                        <Trash2 className="w-4 h-4 mr-2" /> Delete Article
                     </Button>
                 </div>
             </div>

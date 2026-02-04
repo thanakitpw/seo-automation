@@ -19,40 +19,42 @@ export async function generateArticle(keyword: string, clientName: string, langu
         }
         const fullLanguage = languageMap[language] || language
 
-        const prompt = `
-You are an expert SEO Content Writer. Create a high-quality, engaging article for the client "${clientName}".
-Topic/Keyword: "${keyword}"
-${customTitle ? `Strict Title: "${customTitle}" (Use this exact title)` : 'Title: Create a catchy, SEO-friendly title.'}
-Language: ${fullLanguage}
-Tone: ${tone}
+        // More explicit and stricter prompt for consistent output
+        const prompt = `You are an expert SEO Content Writer. Create a high-quality article for "${clientName}".
 
-Guidelines:
-- Write in a natural, human-like tone corresponding to the requested "${tone}" style.
-- ${customTitle ? `Use "${customTitle}" as the main H1 title.` : 'Create a compelling H1 title.'}
-- Structure the content with clear H1, H2, H3 headers.
-- Integrate the keyword naturally throughout the text.
-- Include a catchy title.
-- Integrate the keyword naturally throughout the text.
-- Focus on providing value to the reader (E-E-A-T).
-- Length: Approx 1000-1500 words.
-- IMPORTANT: You MUST complete the article. Do not cut off.
-- Format: Return strictly a Valid JSON object.
+REQUIREMENTS:
+- Keyword: "${keyword}"
+- Language: ${fullLanguage}
+- Tone: ${tone}
+${customTitle ? `- Title: Use exactly "${customTitle}"` : '- Title: Create a catchy, SEO-friendly title'}
 
-JSON Structure:
+ARTICLE STRUCTURE (in Markdown):
+1. Start with H1 title using #
+2. Write an engaging introduction (2-3 paragraphs)
+3. Use H2 (##) for main sections
+4. Use H3 (###) for subsections if needed
+5. Include bullet points or numbered lists where appropriate
+6. End with a conclusion section
+
+LENGTH: 1000-1500 words
+IMPORTANT: Complete the entire article. Do not cut off mid-sentence.
+
+OUTPUT FORMAT: Return ONLY a valid JSON object with NO additional text before or after:
 {
-  "title": "A catchy, SEO-friendly H1 title",
-  "seo_title": "Optimized title for search engines",
-  "slug": "url-friendly-slug-example",
-  "meta_description": "Compelling summary (150-160 chars)",
-  "content": "# [Title] \n\n[Full Markdown Content...]\n\n## Conclusion\n[Final thoughts]"
+  "title": "Your H1 Title Here",
+  "seo_title": "SEO Optimized Title | ${clientName}",
+  "slug": "url-friendly-slug",
+  "meta_description": "Compelling 150-160 character summary",
+  "content": "# Title\\n\\nIntroduction...\\n\\n## Section 1\\n\\nContent...\\n\\n## Conclusion\\n\\nFinal thoughts..."
 }
-`
+
+CRITICAL: Return ONLY the JSON object. No markdown code blocks, no explanations.`
 
         const message = await anthropic.messages.create({
             model: "claude-sonnet-4-5-20250929",
             max_tokens: 8192,
-            temperature: 0.7,
-            system: "You are a professional SEO content writer. You always finish your articles completely.",
+            temperature: 0.5, // Lower temperature for more consistent output
+            system: "You are a professional SEO content writer. You ALWAYS return valid JSON only, with no additional text or markdown code blocks. Your articles are always complete and well-structured.",
             messages: [
                 {
                     role: "user",
@@ -62,30 +64,102 @@ JSON Structure:
         })
 
         // Extract text from the response safely
-        const content = message.content
+        const rawContent = message.content
             .filter((block) => block.type === "text")
             .map((block) => block.text)
             .join("\n")
+            .trim()
 
-        // Parse JSON if possible (Sonnet might wrap in text)
-        // Note: In previous step we updated prompt to return JSON.
-        // We need to correctly parse it here.
+        console.log("--- Raw AI Response (first 500 chars) ---")
+        console.log(rawContent.substring(0, 500))
+        console.log("-------------------------------------------")
+
+        // Robust JSON extraction
+        let jsonString = rawContent
+
+        // Remove markdown code blocks if present
+        if (jsonString.includes('```json')) {
+            jsonString = jsonString.replace(/```json\s*/g, '').replace(/```\s*/g, '')
+        } else if (jsonString.includes('```')) {
+            jsonString = jsonString.replace(/```\s*/g, '')
+        }
+
+        // Find the JSON object boundaries
+        const firstBrace = jsonString.indexOf('{')
+        const lastBrace = jsonString.lastIndexOf('}')
+
+        if (firstBrace === -1 || lastBrace === -1 || firstBrace >= lastBrace) {
+            console.error("No valid JSON structure found in response")
+            // Create a basic article from raw content as fallback
+            return {
+                success: true,
+                keyword,
+                content: `# ${customTitle || keyword}\n\n${rawContent}`,
+                title: customTitle || keyword,
+                seo_title: `${customTitle || keyword} | ${clientName}`,
+                slug: keyword.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
+                meta_description: rawContent.substring(0, 155)
+            }
+        }
+
+        jsonString = jsonString.substring(firstBrace, lastBrace + 1)
+
         try {
-            // Remove markdown code blocks if present
-            const cleanJson = content.replace(/```json/g, '').replace(/```/g, '').trim()
-            const data = JSON.parse(cleanJson)
+            const data = JSON.parse(jsonString)
+
+            // Validate that content doesn't contain the JSON structure itself
+            if (data.content && (data.content.includes('"title":') || data.content.includes('"seo_title":'))) {
+                console.error("Content appears to contain JSON - attempting to clean")
+                // Try to extract just the content field value from nested JSON
+                const contentMatch = data.content.match(/"content"\s*:\s*"([\s\S]*?)(?:"\s*,\s*"|\"\s*})/);
+                if (contentMatch) {
+                    data.content = contentMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"')
+                }
+            }
+
+            // Validate required fields
+            if (!data.content || data.content.length < 100) {
+                console.error("Content is missing or too short")
+                return {
+                    success: true,
+                    keyword,
+                    content: `# ${customTitle || keyword}\n\n${rawContent}`,
+                    title: customTitle || keyword,
+                    seo_title: `${customTitle || keyword} | ${clientName}`,
+                    slug: keyword.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
+                    meta_description: rawContent.substring(0, 155)
+                }
+            }
+
+            console.log("--- Parsed Successfully ---")
+            console.log("Title:", data.title)
+            console.log("Slug:", data.slug)
+            console.log("Content Length:", data.content?.length)
+            console.log("--------------------------")
+
             return {
                 success: true,
                 keyword,
                 content: data.content,
-                title: data.title,
-                seo_title: data.seo_title,
-                slug: data.slug,
-                meta_description: data.meta_description
+                title: data.title || customTitle || keyword,
+                seo_title: data.seo_title || `${data.title || keyword} | ${clientName}`,
+                slug: data.slug || keyword.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
+                meta_description: data.meta_description || ""
             }
-        } catch (e) {
-            // Fallback if not JSON
-            return { success: true, keyword, content, title: undefined, slug: undefined, seo_title: undefined, meta_description: undefined }
+        } catch (parseError) {
+            console.error("JSON Parse Error:", parseError)
+            console.log("Failed JSON String:", jsonString.substring(0, 500))
+
+            // Return a structured fallback
+            return {
+                success: true,
+                keyword,
+                content: `# ${customTitle || keyword}\n\n${rawContent}`,
+                title: customTitle || keyword,
+                seo_title: `${customTitle || keyword} | ${clientName}`,
+                slug: keyword.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
+                meta_description: rawContent.substring(0, 155)
+            }
         }
     } catch (error) {
         console.error("Error generating article:", error)

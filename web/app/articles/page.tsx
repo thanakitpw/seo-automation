@@ -12,7 +12,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import { format } from "date-fns"
 import Link from "next/link"
-import { Eye, FileEdit, Share, RefreshCw, User, CheckCircle } from "lucide-react"
+import { Eye, FileEdit, Share, RefreshCw, User, CheckCircle, Trash2, Wrench } from "lucide-react"
 
 export default function ArticlesPage() {
     const [articles, setArticles] = useState<any[]>([])
@@ -24,6 +24,8 @@ export default function ArticlesPage() {
     // Selection & Bulk Actions
     const [selectedIds, setSelectedIds] = useState<string[]>([])
     const [isBulkPublishing, setIsBulkPublishing] = useState(false)
+    const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+    const [isBulkFixing, setIsBulkFixing] = useState(false)
     const [publishingMap, setPublishingMap] = useState<Record<string, boolean>>({})
 
     // Publish Dialog State
@@ -89,6 +91,50 @@ export default function ArticlesPage() {
         setIsPublishDialogOpen(true)
     }
 
+    async function handleBulkDelete() {
+        if (selectedIds.length === 0) return alert("Select articles first!")
+        if (!confirm(`Are you sure you want to delete ${selectedIds.length} article(s)? This action cannot be undone.`)) return
+
+        setIsBulkDeleting(true)
+        try {
+            const { bulkDeleteArticles } = await import("@/app/actions/articles")
+            const res = await bulkDeleteArticles(selectedIds)
+
+            if (res.success) {
+                // Remove deleted articles from the local state
+                setArticles(prev => prev.filter(a => !selectedIds.includes(a.id)))
+                setSelectedIds([])
+                alert(`Successfully deleted ${res.deletedCount} article(s)!`)
+            } else {
+                alert(`Failed to delete: ${res.error}`)
+            }
+        } catch (e) {
+            console.error(e)
+            alert("Error during bulk delete")
+        }
+        setIsBulkDeleting(false)
+    }
+
+    async function handleBulkFixFormat() {
+        if (selectedIds.length === 0) return alert("Select articles first!")
+        if (!confirm(`Attempt to fix format for ${selectedIds.length} article(s)?`)) return
+
+        setIsBulkFixing(true)
+        try {
+            const { bulkFixArticleFormat } = await import("@/app/actions/articles")
+            const res = await bulkFixArticleFormat(selectedIds)
+
+            setSelectedIds([])
+            alert(`Fix Format Complete:\n✅ Fixed: ${res.fixedCount}\n⏭️ Skipped (OK): ${res.skippedCount}\n❌ Errors: ${res.errorCount}`)
+            // Refresh to show updated articles
+            window.location.reload()
+        } catch (e) {
+            console.error(e)
+            alert("Error during bulk fix")
+        }
+        setIsBulkFixing(false)
+    }
+
     async function executePublish() {
         const idsToPublish = targetPublishId ? [targetPublishId] : selectedIds
         const isBulk = !targetPublishId
@@ -140,13 +186,29 @@ export default function ArticlesPage() {
                 </div>
                 <div className="flex items-center gap-2">
                     {selectedIds.length > 0 && (
-                        <Button onClick={() => openPublishDialog(null)} disabled={isBulkPublishing} variant="default" className="animate-in fade-in zoom-in">
-                            {isBulkPublishing ? (
-                                <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Processing {selectedIds.length}...</>
-                            ) : (
-                                <><Share className="w-4 h-4 mr-2" /> Bulk Publish ({selectedIds.length})</>
-                            )}
-                        </Button>
+                        <>
+                            <Button onClick={handleBulkFixFormat} disabled={isBulkFixing || isBulkDeleting || isBulkPublishing} variant="secondary" className="animate-in fade-in zoom-in">
+                                {isBulkFixing ? (
+                                    <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Fixing...</>
+                                ) : (
+                                    <><Wrench className="w-4 h-4 mr-2" /> Fix ({selectedIds.length})</>
+                                )}
+                            </Button>
+                            <Button onClick={handleBulkDelete} disabled={isBulkDeleting || isBulkPublishing || isBulkFixing} variant="destructive" className="animate-in fade-in zoom-in">
+                                {isBulkDeleting ? (
+                                    <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Deleting...</>
+                                ) : (
+                                    <><Trash2 className="w-4 h-4 mr-2" /> Delete ({selectedIds.length})</>
+                                )}
+                            </Button>
+                            <Button onClick={() => openPublishDialog(null)} disabled={isBulkPublishing || isBulkDeleting} variant="default" className="animate-in fade-in zoom-in">
+                                {isBulkPublishing ? (
+                                    <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Publishing...</>
+                                ) : (
+                                    <><Share className="w-4 h-4 mr-2" /> Publish ({selectedIds.length})</>
+                                )}
+                            </Button>
+                        </>
                     )}
                     <Link href="/generate-bulk">
                         <Button>+ Generate New</Button>
